@@ -124,21 +124,7 @@ class MHTMLTableExtractor:
             cells = []
             for cell_match in cell_matches:
                 cell_html = cell_match.group(1)
-
-                # Convert list items to bullet points before removing tags
-                cell_html = re.sub(r'<li[^>]*>', '\n- ', cell_html, flags=re.IGNORECASE)
-                cell_html = re.sub(r'</li>', '', cell_html, flags=re.IGNORECASE)
-
-                # Convert paragraphs to double newlines
-                cell_html = re.sub(r'</p>\s*<p[^>]*>', '\n\n', cell_html, flags=re.IGNORECASE)
-
-                # Remove all remaining HTML tags
-                cell_text = re.sub(r'<[^>]+>', '', cell_html)
-
-                # Clean up excessive whitespace but preserve newlines
-                lines = [line.strip() for line in cell_text.split('\n')]
-                cell_text = '\n'.join(line for line in lines if line)
-
+                cell_text = self._parse_cell_content(cell_html)
                 cells.append(cell_text)
 
             if len(cells) >= 2:  # Only keep rows with at least 2 cells
@@ -146,6 +132,122 @@ class MHTMLTableExtractor:
 
         self.log(f"Parsed {len(rows)} rows")
         return rows
+
+    def _parse_cell_content(self, cell_html: str, indent_level: int = 0) -> str:
+        """
+        Parse cell content recursively, handling nested lists properly.
+
+        Args:
+            cell_html: HTML content of the cell
+            indent_level: Current indentation level for nested lists
+
+        Returns:
+            Formatted text content
+        """
+        result = []
+        indent = "  " * indent_level
+
+        # Handle ordered lists (convert to numbered items, or bullets for sub-lists)
+        ol_pattern = r'<ol[^>]*>(.*?)</ol>'
+        for ol_match in re.finditer(ol_pattern, cell_html, re.DOTALL | re.IGNORECASE):
+            ol_content = ol_match.group(1)
+
+            # Extract list items
+            li_pattern = r'<li[^>]*>(.*?)</li>'
+            li_matches = list(re.finditer(li_pattern, ol_content, re.DOTALL | re.IGNORECASE))
+
+            for i, li_match in enumerate(li_matches, 1):
+                li_html = li_match.group(1)
+
+                # Check for nested lists
+                has_nested = bool(re.search(r'<[ou]l[^>]*>', li_html, re.IGNORECASE))
+
+                if has_nested:
+                    # Parse nested content recursively
+                    nested_content = self._parse_cell_content(li_html, indent_level + 1)
+                    # Extract text before nested list
+                    text_before = re.sub(r'<[ou]l[^>]*>.*?</[ou]l>', '', li_html, flags=re.DOTALL | re.IGNORECASE)
+                    text_before = self._remove_html_tags(text_before).strip()
+
+                    if text_before:
+                        result.append(f"{indent}- {text_before}")
+                    if nested_content:
+                        result.append(nested_content)
+                else:
+                    # Simple list item
+                    text = self._remove_html_tags(li_html)
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    if text:
+                        result.append(f"{indent}- {text}")
+
+            # Remove processed <ol> from cell_html
+            cell_html = cell_html.replace(ol_match.group(0), '')
+
+        # Handle unordered lists
+        ul_pattern = r'<ul[^>]*>(.*?)</ul>'
+        for ul_match in re.finditer(ul_pattern, cell_html, re.DOTALL | re.IGNORECASE):
+            ul_content = ul_match.group(1)
+
+            # Extract list items
+            li_pattern = r'<li[^>]*>(.*?)</li>'
+            for li_match in re.finditer(li_pattern, ul_content, re.DOTALL | re.IGNORECASE):
+                li_html = li_match.group(1)
+
+                # Check for nested lists
+                has_nested = bool(re.search(r'<[ou]l[^>]*>', li_html, re.IGNORECASE))
+
+                if has_nested:
+                    nested_content = self._parse_cell_content(li_html, indent_level + 1)
+                    text_before = re.sub(r'<[ou]l[^>]*>.*?</[ou]l>', '', li_html, flags=re.DOTALL | re.IGNORECASE)
+                    text_before = self._remove_html_tags(text_before).strip()
+
+                    if text_before:
+                        result.append(f"{indent}- {text_before}")
+                    if nested_content:
+                        result.append(nested_content)
+                else:
+                    text = self._remove_html_tags(li_html)
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    if text:
+                        result.append(f"{indent}- {text}")
+
+            # Remove processed <ul> from cell_html
+            cell_html = cell_html.replace(ul_match.group(0), '')
+
+        # Handle remaining paragraphs (non-list content)
+        # Remove lists first as we've already processed them
+        cell_html = re.sub(r'<[ou]l[^>]*>.*?</[ou]l>', '', cell_html, flags=re.DOTALL | re.IGNORECASE)
+
+        # Split by paragraph tags
+        paragraphs = re.split(r'</p>\s*<p[^>]*>|<p[^>]*>|</p>', cell_html, flags=re.IGNORECASE)
+
+        for para in paragraphs:
+            # Remove all remaining HTML tags
+            text = self._remove_html_tags(para)
+            # Normalize whitespace
+            text = re.sub(r'\s+', ' ', text).strip()
+            if text and text not in result:
+                result.append(text)
+
+        return '\n'.join(result)
+
+    def _remove_html_tags(self, html: str) -> str:
+        """
+        Remove HTML tags from text while preserving content including < and > characters.
+
+        This is more careful than a simple regex because it only removes actual HTML tags,
+        not comparison operators like < or >.
+
+        Args:
+            html: HTML string
+
+        Returns:
+            Text with HTML tags removed
+        """
+        # Remove actual HTML tags (opening and closing tags with proper tag names)
+        # Tag names must start with a letter
+        text = re.sub(r'</?[a-zA-Z][^>]*>', '', html)
+        return text
 
     def rows_to_markdown(self, rows: List[Tuple[str, str]], title: str) -> str:
         """
@@ -161,6 +263,14 @@ class MHTMLTableExtractor:
         markdown_lines = []
         markdown_lines.append(f"# {title}\n")
 
+        # Define metadata headers to skip (from document header table)
+        metadata_headers = {
+            'Dokumentbrugere:',
+            'Læseadgang:',
+            'Coronavirus (SARS-Coronavirus-2)',
+            'KLINISK MIKROBIOLOGISK AFSNIT'
+        }
+
         for header, content in rows:
             header = header.strip()
             content = content.strip()
@@ -171,6 +281,14 @@ class MHTMLTableExtractor:
 
             # Skip navigation rows with │
             if '│' in header or '│' in content:
+                continue
+
+            # Skip metadata/header rows
+            if any(meta in header for meta in metadata_headers):
+                continue
+
+            # Skip rows where header starts with known metadata patterns
+            if header.startswith('Dokument ID:') or header.startswith('Niveau:'):
                 continue
 
             # Format as markdown
