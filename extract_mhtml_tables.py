@@ -30,6 +30,10 @@ class MHTMLTableExtractor:
         '=C3=A9': 'é',
         '=C2=B0': '°',
         '=E2=94=82': '│',
+        '=E2=80=93': '–',  # En dash
+        '=E2=80=94': '—',  # Em dash
+        '=E2=89=A5': '≥',  # Greater than or equal
+        '=C3=97': '×',  # Multiplication sign
         '=3D': '=',
         '=20': ' ',
     }
@@ -66,6 +70,11 @@ class MHTMLTableExtractor:
         """
         Extract the main laboratory information table from an MHTML file.
 
+        Handles multiple table formats:
+        - Tables with green headers (bgcolor="#99cc00")
+        - Tables with border styling
+        - Other structured data tables
+
         Args:
             filepath: Path to the MHTML file
 
@@ -80,16 +89,71 @@ class MHTMLTableExtractor:
         # Remove soft line breaks (quoted-printable continuation)
         content = re.sub(r'=\r?\n', '', content)
 
-        # Find the main table with green headers (bgcolor="#99cc00")
-        # This table contains the laboratory information
-        pattern = r'<table[^>]*>.*?bgcolor.*?#99cc00.*?UNDERS.*?PRINCIP.*?</table>'
-        match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+        # Try pattern 1: Table with green headers (bgcolor="#99cc00")
+        pattern1 = r'<table[^>]*>.*?bgcolor.*?#99cc00.*?UNDERS.*?PRINCIP.*?</table>'
+        match = re.search(pattern1, content, re.DOTALL | re.IGNORECASE)
 
-        if not match:
-            self.log("Main table not found")
-            return None
+        if match:
+            self.log("Found table with green headers (Pattern 1)")
+            table_html = match.group(0)
+        else:
+            # Try pattern 2: Tables with border styling containing structured data
+            # Look for tables with bold headers and border styles
+            pattern2 = r'<table[^>]*border[^>]*>.*?</table>'
+            matches = list(re.finditer(pattern2, content, re.DOTALL | re.IGNORECASE))
 
-        table_html = match.group(0)
+            # Find the largest table with structured content (headers in bold)
+            best_match = None
+            max_size = 0
+
+            for m in matches:
+                table = m.group(0)
+                # Check if table has bold headers and substantial content
+                has_headers = bool(re.search(r'<b[^>]*>.*?(Hyppigste|Fokus|Behandling|INDIKATION|PRINCIP)', table, re.IGNORECASE))
+                table_size = len(table)
+
+                if has_headers and table_size > max_size:
+                    best_match = m
+                    max_size = table_size
+
+            if best_match:
+                self.log(f"Found table with border styling (Pattern 2, size={max_size})")
+                table_html = best_match.group(0)
+            else:
+                # Try pattern 3: Find nested data tables within document sections
+                # First get all section tables
+                section_pattern = r'<table[^>]*class=["\']*tableDokAfsnit[^>]*>.*?</table>'
+                section_matches = list(re.finditer(section_pattern, content, re.DOTALL | re.IGNORECASE))
+
+                if section_matches:
+                    self.log(f"Found {len(section_matches)} document sections")
+
+                    # Extract nested data tables from within sections
+                    nested_tables = []
+                    for section_match in section_matches:
+                        section_html = section_match.group(0)
+
+                        # Find tables with border/style attributes (actual data tables)
+                        nested_pattern = r'<table[^>]*(?:border|style)[^>]*>.*?</table>'
+                        nested_matches = re.finditer(nested_pattern, section_html, re.DOTALL | re.IGNORECASE)
+
+                        for nested_match in nested_matches:
+                            nested_table = nested_match.group(0)
+                            # Only include tables that aren't the outer section table itself
+                            if 'tableDokAfsnit' not in nested_table[:100]:
+                                nested_tables.append(nested_table)
+
+                    if nested_tables:
+                        self.log(f"Found {len(nested_tables)} nested data tables (Pattern 3)")
+                        # Wrap all tables in a container
+                        table_html = '<div>' + '\n'.join(nested_tables) + '</div>'
+                    else:
+                        # Fall back to combining section content
+                        self.log("Using section content as fallback")
+                        table_html = '<table>' + ''.join(m.group(0) for m in section_matches) + '</table>'
+                else:
+                    self.log("No suitable table found")
+                    return None
 
         # Decode the HTML
         table_html = self.decode_quoted_printable(table_html)
@@ -98,7 +162,7 @@ class MHTMLTableExtractor:
         self.log("Table extracted successfully")
         return table_html
 
-    def parse_table_rows(self, table_html: str) -> List[Tuple[str, str]]:
+    def parse_table_rows(self, table_html: str) -> List[List[str]]:
         """
         Parse table rows and extract cell content.
 
@@ -106,7 +170,7 @@ class MHTMLTableExtractor:
             table_html: HTML string of the table
 
         Returns:
-            List of tuples (header, content) for each row
+            List of rows, where each row is a list of cell contents
         """
         rows = []
 
@@ -127,8 +191,9 @@ class MHTMLTableExtractor:
                 cell_text = self._parse_cell_content(cell_html)
                 cells.append(cell_text)
 
-            if len(cells) >= 2:  # Only keep rows with at least 2 cells
-                rows.append((cells[0], cells[1]))
+            # Keep all rows with at least 1 cell, preserve all columns
+            if cells:
+                rows.append(cells)
 
         self.log(f"Parsed {len(rows)} rows")
         return rows
@@ -249,17 +314,23 @@ class MHTMLTableExtractor:
         text = re.sub(r'</?[a-zA-Z][^>]*>', '', html)
         return text
 
-    def rows_to_markdown(self, rows: List[Tuple[str, str]], title: str) -> str:
+    def rows_to_markdown(self, rows: List[List[str]], title: str) -> str:
         """
         Convert table rows to Markdown format.
 
+        Handles both multi-column tables (rendered as markdown tables) and
+        2-column tables (rendered as header/content pairs).
+
         Args:
-            rows: List of (header, content) tuples
+            rows: List of rows, where each row is a list of cell contents
             title: Title for the markdown document
 
         Returns:
             Formatted markdown string
         """
+        if not rows:
+            return f"# {title}\n\nNo content found.\n"
+
         markdown_lines = []
         markdown_lines.append(f"# {title}\n")
 
@@ -271,9 +342,120 @@ class MHTMLTableExtractor:
             'KLINISK MIKROBIOLOGISK AFSNIT'
         }
 
-        for header, content in rows:
-            header = header.strip()
-            content = content.strip()
+        # Determine if this is a multi-column table
+        # Check the first non-empty row to see how many columns it has
+        num_columns = 0
+        for row in rows:
+            if row and any(cell.strip() for cell in row):
+                num_columns = len(row)
+                break
+
+        # If we have more than 2 columns, render as a markdown table
+        if num_columns > 2:
+            self.log(f"Rendering as {num_columns}-column markdown table")
+            return self._render_markdown_table(rows, title, metadata_headers)
+        else:
+            # Legacy 2-column format: render as header/content pairs
+            self.log("Rendering as 2-column header/content format")
+            return self._render_two_column_format(rows, title, metadata_headers)
+
+    def _render_markdown_table(self, rows: List[List[str]], title: str, metadata_headers: set) -> str:
+        """
+        Render multi-column table as a markdown table.
+
+        Args:
+            rows: List of rows with multiple columns
+            title: Document title
+            metadata_headers: Set of metadata patterns to skip
+
+        Returns:
+            Formatted markdown table string
+        """
+        markdown_lines = [f"# {title}\n"]
+
+        if not rows:
+            return '\n'.join(markdown_lines)
+
+        # Filter out metadata and navigation rows
+        filtered_rows = []
+        for row in rows:
+            # Skip empty rows
+            if not any(cell.strip() for cell in row):
+                continue
+
+            # Skip navigation rows with │
+            if any('│' in cell for cell in row):
+                continue
+
+            # Skip metadata rows
+            if any(any(meta in cell for meta in metadata_headers) for cell in row):
+                continue
+
+            # Skip rows where first cell starts with known metadata patterns
+            if row and (row[0].strip().startswith('Dokument ID:') or
+                       row[0].strip().startswith('Niveau:')):
+                continue
+
+            filtered_rows.append(row)
+
+        if not filtered_rows:
+            return '\n'.join(markdown_lines)
+
+        # Determine max number of columns
+        max_cols = max(len(row) for row in filtered_rows)
+
+        # Assume first row is the header
+        header_row = filtered_rows[0]
+        data_rows = filtered_rows[1:]
+
+        # Normalize header row to max_cols
+        # Replace newlines with spaces in headers to keep them on one line
+        header_cells = [cell.strip().replace('\n', ' ') for cell in header_row]
+        while len(header_cells) < max_cols:
+            header_cells.append('')
+
+        # Build markdown table
+        # Header row
+        markdown_lines.append('| ' + ' | '.join(header_cells) + ' |')
+
+        # Separator row
+        markdown_lines.append('|' + '|'.join(['---' for _ in range(max_cols)]) + '|')
+
+        # Data rows
+        for row in data_rows:
+            # Normalize row to max_cols
+            cells = [cell.strip() for cell in row]
+            while len(cells) < max_cols:
+                cells.append('')
+
+            # Replace newlines with <br> for markdown table cells
+            cells = [cell.replace('\n', '<br>') for cell in cells]
+            markdown_lines.append('| ' + ' | '.join(cells) + ' |')
+
+        markdown_lines.append('')  # Add blank line at end
+        return '\n'.join(markdown_lines)
+
+    def _render_two_column_format(self, rows: List[List[str]], title: str, metadata_headers: set) -> str:
+        """
+        Render 2-column table as header/content pairs (legacy format).
+
+        Args:
+            rows: List of 2-column rows
+            title: Document title
+            metadata_headers: Set of metadata patterns to skip
+
+        Returns:
+            Formatted markdown string
+        """
+        markdown_lines = [f"# {title}\n"]
+
+        for row in rows:
+            # Ensure row has at least 2 elements
+            if len(row) < 2:
+                continue
+
+            header = row[0].strip()
+            content = row[1].strip()
 
             # Skip empty rows
             if not header and not content:
