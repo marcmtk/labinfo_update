@@ -30,6 +30,8 @@ class MHTMLTableExtractor:
         '=C3=A9': 'é',
         '=C2=B0': '°',
         '=E2=94=82': '│',
+        '=E2=80=93': '–',  # En dash
+        '=E2=80=94': '—',  # Em dash
         '=3D': '=',
         '=20': ' ',
     }
@@ -66,6 +68,11 @@ class MHTMLTableExtractor:
         """
         Extract the main laboratory information table from an MHTML file.
 
+        Handles multiple table formats:
+        - Tables with green headers (bgcolor="#99cc00")
+        - Tables with border styling
+        - Other structured data tables
+
         Args:
             filepath: Path to the MHTML file
 
@@ -80,16 +87,71 @@ class MHTMLTableExtractor:
         # Remove soft line breaks (quoted-printable continuation)
         content = re.sub(r'=\r?\n', '', content)
 
-        # Find the main table with green headers (bgcolor="#99cc00")
-        # This table contains the laboratory information
-        pattern = r'<table[^>]*>.*?bgcolor.*?#99cc00.*?UNDERS.*?PRINCIP.*?</table>'
-        match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+        # Try pattern 1: Table with green headers (bgcolor="#99cc00")
+        pattern1 = r'<table[^>]*>.*?bgcolor.*?#99cc00.*?UNDERS.*?PRINCIP.*?</table>'
+        match = re.search(pattern1, content, re.DOTALL | re.IGNORECASE)
 
-        if not match:
-            self.log("Main table not found")
-            return None
+        if match:
+            self.log("Found table with green headers (Pattern 1)")
+            table_html = match.group(0)
+        else:
+            # Try pattern 2: Tables with border styling containing structured data
+            # Look for tables with bold headers and border styles
+            pattern2 = r'<table[^>]*border[^>]*>.*?</table>'
+            matches = list(re.finditer(pattern2, content, re.DOTALL | re.IGNORECASE))
 
-        table_html = match.group(0)
+            # Find the largest table with structured content (headers in bold)
+            best_match = None
+            max_size = 0
+
+            for m in matches:
+                table = m.group(0)
+                # Check if table has bold headers and substantial content
+                has_headers = bool(re.search(r'<b[^>]*>.*?(Hyppigste|Fokus|Behandling|INDIKATION|PRINCIP)', table, re.IGNORECASE))
+                table_size = len(table)
+
+                if has_headers and table_size > max_size:
+                    best_match = m
+                    max_size = table_size
+
+            if best_match:
+                self.log(f"Found table with border styling (Pattern 2, size={max_size})")
+                table_html = best_match.group(0)
+            else:
+                # Try pattern 3: Find nested data tables within document sections
+                # First get all section tables
+                section_pattern = r'<table[^>]*class=["\']*tableDokAfsnit[^>]*>.*?</table>'
+                section_matches = list(re.finditer(section_pattern, content, re.DOTALL | re.IGNORECASE))
+
+                if section_matches:
+                    self.log(f"Found {len(section_matches)} document sections")
+
+                    # Extract nested data tables from within sections
+                    nested_tables = []
+                    for section_match in section_matches:
+                        section_html = section_match.group(0)
+
+                        # Find tables with border/style attributes (actual data tables)
+                        nested_pattern = r'<table[^>]*(?:border|style)[^>]*>.*?</table>'
+                        nested_matches = re.finditer(nested_pattern, section_html, re.DOTALL | re.IGNORECASE)
+
+                        for nested_match in nested_matches:
+                            nested_table = nested_match.group(0)
+                            # Only include tables that aren't the outer section table itself
+                            if 'tableDokAfsnit' not in nested_table[:100]:
+                                nested_tables.append(nested_table)
+
+                    if nested_tables:
+                        self.log(f"Found {len(nested_tables)} nested data tables (Pattern 3)")
+                        # Wrap all tables in a container
+                        table_html = '<div>' + '\n'.join(nested_tables) + '</div>'
+                    else:
+                        # Fall back to combining section content
+                        self.log("Using section content as fallback")
+                        table_html = '<table>' + ''.join(m.group(0) for m in section_matches) + '</table>'
+                else:
+                    self.log("No suitable table found")
+                    return None
 
         # Decode the HTML
         table_html = self.decode_quoted_printable(table_html)
