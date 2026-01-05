@@ -32,6 +32,8 @@ class MHTMLTableExtractor:
         '=E2=94=82': '│',
         '=E2=80=93': '–',  # En dash
         '=E2=80=94': '—',  # Em dash
+        '=E2=89=A5': '≥',  # Greater than or equal
+        '=C3=97': '×',  # Multiplication sign
         '=3D': '=',
         '=20': ' ',
     }
@@ -160,7 +162,7 @@ class MHTMLTableExtractor:
         self.log("Table extracted successfully")
         return table_html
 
-    def parse_table_rows(self, table_html: str) -> List[Tuple[str, str]]:
+    def parse_table_rows(self, table_html: str) -> List[List[str]]:
         """
         Parse table rows and extract cell content.
 
@@ -168,7 +170,7 @@ class MHTMLTableExtractor:
             table_html: HTML string of the table
 
         Returns:
-            List of tuples (header, content) for each row
+            List of rows, where each row is a list of cell contents
         """
         rows = []
 
@@ -189,8 +191,9 @@ class MHTMLTableExtractor:
                 cell_text = self._parse_cell_content(cell_html)
                 cells.append(cell_text)
 
-            if len(cells) >= 2:  # Only keep rows with at least 2 cells
-                rows.append((cells[0], cells[1]))
+            # Keep all rows with at least 1 cell, preserve all columns
+            if cells:
+                rows.append(cells)
 
         self.log(f"Parsed {len(rows)} rows")
         return rows
@@ -311,17 +314,23 @@ class MHTMLTableExtractor:
         text = re.sub(r'</?[a-zA-Z][^>]*>', '', html)
         return text
 
-    def rows_to_markdown(self, rows: List[Tuple[str, str]], title: str) -> str:
+    def rows_to_markdown(self, rows: List[List[str]], title: str) -> str:
         """
         Convert table rows to Markdown format.
 
+        Handles both multi-column tables (rendered as markdown tables) and
+        2-column tables (rendered as header/content pairs).
+
         Args:
-            rows: List of (header, content) tuples
+            rows: List of rows, where each row is a list of cell contents
             title: Title for the markdown document
 
         Returns:
             Formatted markdown string
         """
+        if not rows:
+            return f"# {title}\n\nNo content found.\n"
+
         markdown_lines = []
         markdown_lines.append(f"# {title}\n")
 
@@ -333,9 +342,120 @@ class MHTMLTableExtractor:
             'KLINISK MIKROBIOLOGISK AFSNIT'
         }
 
-        for header, content in rows:
-            header = header.strip()
-            content = content.strip()
+        # Determine if this is a multi-column table
+        # Check the first non-empty row to see how many columns it has
+        num_columns = 0
+        for row in rows:
+            if row and any(cell.strip() for cell in row):
+                num_columns = len(row)
+                break
+
+        # If we have more than 2 columns, render as a markdown table
+        if num_columns > 2:
+            self.log(f"Rendering as {num_columns}-column markdown table")
+            return self._render_markdown_table(rows, title, metadata_headers)
+        else:
+            # Legacy 2-column format: render as header/content pairs
+            self.log("Rendering as 2-column header/content format")
+            return self._render_two_column_format(rows, title, metadata_headers)
+
+    def _render_markdown_table(self, rows: List[List[str]], title: str, metadata_headers: set) -> str:
+        """
+        Render multi-column table as a markdown table.
+
+        Args:
+            rows: List of rows with multiple columns
+            title: Document title
+            metadata_headers: Set of metadata patterns to skip
+
+        Returns:
+            Formatted markdown table string
+        """
+        markdown_lines = [f"# {title}\n"]
+
+        if not rows:
+            return '\n'.join(markdown_lines)
+
+        # Filter out metadata and navigation rows
+        filtered_rows = []
+        for row in rows:
+            # Skip empty rows
+            if not any(cell.strip() for cell in row):
+                continue
+
+            # Skip navigation rows with │
+            if any('│' in cell for cell in row):
+                continue
+
+            # Skip metadata rows
+            if any(any(meta in cell for meta in metadata_headers) for cell in row):
+                continue
+
+            # Skip rows where first cell starts with known metadata patterns
+            if row and (row[0].strip().startswith('Dokument ID:') or
+                       row[0].strip().startswith('Niveau:')):
+                continue
+
+            filtered_rows.append(row)
+
+        if not filtered_rows:
+            return '\n'.join(markdown_lines)
+
+        # Determine max number of columns
+        max_cols = max(len(row) for row in filtered_rows)
+
+        # Assume first row is the header
+        header_row = filtered_rows[0]
+        data_rows = filtered_rows[1:]
+
+        # Normalize header row to max_cols
+        # Replace newlines with spaces in headers to keep them on one line
+        header_cells = [cell.strip().replace('\n', ' ') for cell in header_row]
+        while len(header_cells) < max_cols:
+            header_cells.append('')
+
+        # Build markdown table
+        # Header row
+        markdown_lines.append('| ' + ' | '.join(header_cells) + ' |')
+
+        # Separator row
+        markdown_lines.append('|' + '|'.join(['---' for _ in range(max_cols)]) + '|')
+
+        # Data rows
+        for row in data_rows:
+            # Normalize row to max_cols
+            cells = [cell.strip() for cell in row]
+            while len(cells) < max_cols:
+                cells.append('')
+
+            # Replace newlines with <br> for markdown table cells
+            cells = [cell.replace('\n', '<br>') for cell in cells]
+            markdown_lines.append('| ' + ' | '.join(cells) + ' |')
+
+        markdown_lines.append('')  # Add blank line at end
+        return '\n'.join(markdown_lines)
+
+    def _render_two_column_format(self, rows: List[List[str]], title: str, metadata_headers: set) -> str:
+        """
+        Render 2-column table as header/content pairs (legacy format).
+
+        Args:
+            rows: List of 2-column rows
+            title: Document title
+            metadata_headers: Set of metadata patterns to skip
+
+        Returns:
+            Formatted markdown string
+        """
+        markdown_lines = [f"# {title}\n"]
+
+        for row in rows:
+            # Ensure row has at least 2 elements
+            if len(row) < 2:
+                continue
+
+            header = row[0].strip()
+            content = row[1].strip()
 
             # Skip empty rows
             if not header and not content:

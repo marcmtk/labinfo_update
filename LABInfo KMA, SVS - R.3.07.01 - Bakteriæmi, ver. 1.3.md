@@ -1,24 +1,5 @@
 # R.3.07.01 - Bakteriæmi, ver. 1.3
 
-## 2.1)
-
-Gram-positive kokker i hobe – ligner stafylokokker
-Hyppigste bakterier
-
-## S. aureus
-S. lugdunensis
-Koagulase negative stafylokokker
-(KNS)
-Aerokokker
-Mikrokokker
-
-S. aureus og S. lugdunensis
-Der skelnes mellem samfundserhvervet infektion som oftest stammer fra hud, knogler/led og hjerte (erysipelas/cellulitis, arthritis, osteomyelitis, endocarditis) og hospitalserhvervet infektion (inficeret iv kateter eller shunt, sårinfektion, nylig operation)
-Koagulase negative stafylokokker
-Oftest inficeret iv kateter eller andet
-fremmedmateriale
-(proteseinfektion/kunstige hjerteklapper)
-Aerokokker
-Hos ældre oftest urinveje, men endocarditis også mulig
-Mikrokokker
-Forurening
+| 2.1) | Gram-positive kokker i hobe – ligner stafylokokker Hyppigste bakterier | Fokus | Empirisk behandling | Målrettet behandling (efter resistensbestemmelse) | Kommentar/relevans |
+|---|---|---|---|---|---|
+| S. aureus<br>S. lugdunensis<br>Koagulase negative stafylokokker<br>(KNS)<br>Aerokokker<br>Mikrokokker | S. aureus og S. lugdunensis<br>Der skelnes mellem samfundserhvervet infektion som oftest stammer fra hud, knogler/led og hjerte (erysipelas/cellulitis, arthritis, osteomyelitis, endocarditis) og hospitalserhvervet infektion (inficeret iv kateter eller shunt, sårinfektion, nylig operation)<br>Koagulase negative stafylokokker<br>Oftest inficeret iv kateter eller andet<br>fremmedmateriale<br>(proteseinfektion/kunstige hjerteklapper)<br>Aerokokker<br>Hos ældre oftest urinveje, men endocarditis også mulig<br>Mikrokokker<br>Forurening | Cloxacillin 1 g × 4 iv<br>Ved penicillinallergi Cefuroxim 1,5 g × 3<br>iv<br>Ved allergi mod penicilliner, cefalosporiner OG carbapenemer (sjældent)<br>Vancomycin 15-20 mg/kg x 2-3<br>Ved kendt MRSA kolonisation tillægges vancomycin 15-20 mg/kg x 2-3 indtil resistensbestemmelse foreligger<br>KNS | Penicillinfølsomme S. aureus og<br>S. lugdunensis<br>Penicillin 1,2g x 4 iv<br>Penicillinresistente,<br>meticillinfølsomme stafylokokker<br>Cloxacillin 1g x 4 iv<br>MRSA- Vancomycin 15-20 mg/kg x 2-3<br>Vancomycin 15-20 mg/kg x 2-3<br>Penicillinfølsomme Aerococcus sp. | Vækst i ≥2 flasker ringes ud. Vækst i 1 af 4 flasker ringes sædvanligvis ikke ud (forurening?), men kan overvejes ved børn (neonatale, onkologiske).<br>Der spørges til om patienten har risikofaktorer f.eks. kunstig hjerteklap, protese eller andet fremmedlegeme, permanent iv kateter, nylig operation.<br>Ved kateter-relateret infektion bør alle iv adgange skiftes.<br>Varighed af S. aureus bakteriæmi er som udgangspunkt 14 dages behandling efter sidste positive bloddyrkning.<br>OBS anbefaling om udredning for IE ved S. aureus bakteriæmi uden oplagt fokus og ved patient med andet invasivt fokus og mulig længerevarende ubehandlet bakteriæmi. |  |
