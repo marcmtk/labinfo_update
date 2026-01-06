@@ -61,6 +61,129 @@ def decode_quoted_printable(text: str) -> str:
     return text
 
 
+def sanitize_html(html: str, verbose: bool = False) -> str:
+    """
+    Remove cruft from extracted HTML to reduce size for markdown conversion.
+
+    Removes:
+    - Empty/whitespace-only elements
+    - Layout wrapper tables (system tables, logo tables)
+    - Presentational attributes (cellpadding, width, style, class, etc.)
+    - Redundant anchor tags
+    - Spacer elements
+
+    Preserves:
+    - Content tables (with green headers)
+    - Text content, lists, links
+    - Basic formatting (bold, italic)
+    """
+    original_len = len(html)
+
+    # 1. Remove system wrapper tables entirely (they contain no useful content)
+    # These are layout tables with specific IDs/classes
+    system_table_patterns = [
+        r'<table[^>]*id="tbSysDokInfo"[^>]*>.*?</table>',
+        r'<table[^>]*id="tbSysDokFormaal"[^>]*>.*?</table>',
+        r'<table[^>]*id="tbSysAfsnitStart"[^>]*>.*?</table>',
+        r'<table[^>]*id="tblBodyDocReferences"[^>]*>.*?</table>',
+        r'<table[^>]*class="tblDokNameLogo"[^>]*>.*?</table>',
+    ]
+    for pattern in system_table_patterns:
+        html = re.sub(pattern, '', html, flags=re.DOTALL | re.IGNORECASE)
+
+    # 2. Remove wrapper divs but keep their content
+    # Remove the dsidDocContWrap div wrapper (keep content)
+    html = re.sub(r'<div[^>]*class="dsidDocContWrap"[^>]*>', '', html)
+    html = re.sub(r'<div[^>]*class="dsidDocNameLogo"[^>]*>', '', html)
+    html = re.sub(r'<div[^>]*class="dsidDocNamePrefix"[^>]*>.*?</div>', '', html, flags=re.DOTALL)
+    html = re.sub(r'<div[^>]*class="DocBodyDocReferences"[^>]*>', '', html)
+
+    # 3. Remove spacer divs (zero-height divs used for layout)
+    html = re.sub(r'<div[^>]*style="[^"]*height:\s*1px[^"]*"[^>]*>\s*</div>', '', html)
+
+    # 4. Remove empty spans and paragraphs
+    # Iteratively remove empty elements (they may be nested)
+    for _ in range(3):  # Multiple passes for nested empties
+        html = re.sub(r'<span[^>]*>\s*</span>', '', html)
+        html = re.sub(r'<span[^>]*><br\s*/?>\s*</span>', '', html)
+        html = re.sub(r'<p[^>]*>\s*</p>', '', html)
+        html = re.sub(r'<p[^>]*>\s*<strong>\s*</strong>\s*</p>', '', html)
+        html = re.sub(r'<p[^>]*>\s*<span[^>]*>\s*</span>\s*</p>', '', html)
+        html = re.sub(r'<p[^>]*>\s*<span[^>]*>\s*<br\s*/?>\s*</span>\s*</p>', '', html)
+
+    # 5. Clean up tableDokAfsnit wrapper structure
+    # These tables wrap content sections with a 44px margin column and colgroup
+    # Remove colgroups (used for column width styling)
+    html = re.sub(r'<colgroup>.*?</colgroup>', '', html, flags=re.DOTALL)
+    # Remove empty margin cells (width="44" cells that just contain anchors/whitespace)
+    html = re.sub(r'<td[^>]*width="44"[^>]*>.*?</td>', '', html, flags=re.DOTALL)
+
+    # 6. Remove redundant anchor clusters (keep first meaningful one)
+    # Pattern: <a name="x"></a><a name="y"></a>... -> keep just one
+    def simplify_anchors(match):
+        anchors = re.findall(r'<a name="([^"]+)">', match.group(0))
+        if anchors:
+            # Prefer anchors that look meaningful (not just "nr", "Nr", "NR", etc.)
+            meaningful = [a for a in anchors if len(a) > 3 and not a.lower().startswith('rub')]
+            if meaningful:
+                return f'<a name="{meaningful[0]}"></a>'
+            return f'<a name="{anchors[0]}"></a>'
+        return ''
+    html = re.sub(r'(<a name="[^"]*"></a>\s*){2,}', simplify_anchors, html)
+
+    # 7. Strip presentational attributes from remaining tags
+    # Remove: cellpadding, cellspacing, valign, width (on non-content elements), border
+    html = re.sub(r'\s+cellpadding="[^"]*"', '', html)
+    html = re.sub(r'\s+cellspacing="[^"]*"', '', html)
+    html = re.sub(r'\s+valign="[^"]*"', '', html)
+    html = re.sub(r'\s+border="[^"]*"', '', html)
+
+    # Remove class attributes (they're system-specific and not useful)
+    html = re.sub(r'\s+class="[^"]*"', '', html)
+
+    # Remove style attributes except for background-color (used for header cells)
+    def clean_style(match):
+        style = match.group(1)
+        # Keep only background-color if it's the green header color
+        if 'background-color' in style or 'bgcolor' in style:
+            bg_match = re.search(r'background-color:\s*rgb\(153,\s*204,\s*0\)', style)
+            if bg_match:
+                return ' style="background-color: #99cc00;"'
+        return ''
+    html = re.sub(r'\s+style="([^"]*)"', clean_style, html)
+
+    # 8. Remove dokafsnitid and similar data attributes
+    html = re.sub(r'\s+dokafsnitid="[^"]*"', '', html)
+    html = re.sub(r'\s+id="[^"]*"', '', html)
+
+    # 9. Remove width attributes from table cells (keep table structure but not widths)
+    html = re.sub(r'\s+width="[^"]*"', '', html)
+
+    # 10. Clean up excessive whitespace
+    html = re.sub(r'\n\s*\n\s*\n', '\n\n', html)  # Max 2 consecutive newlines
+    html = re.sub(r'>\s+<', '>\n<', html)  # Clean up space between tags
+
+    # 11. Remove empty table rows and cells that only contain whitespace
+    html = re.sub(r'<tr>\s*<td>\s*</td>\s*</tr>', '', html)
+    html = re.sub(r'<tr>\s*<td>\s*<span>\s*</span>\s*</td>\s*</tr>', '', html)
+
+    # 12. Remove orphaned closing tags
+    # At the end
+    html = re.sub(r'(</div>\s*)+$', '', html)
+    # Orphaned sequences of closing tags without matching content
+    # These appear when we remove system wrappers but their closing tags remain
+    html = re.sub(r'</div>\s*(</span>\s*)?(</td>\s*)?(</tr>\s*)?(</tbody>\s*)?(</table>\s*)?(?=<)', '', html)
+    # At the very start after header div
+    html = re.sub(r'(</div>)\s*(</span>|</td>|</tr>|</tbody>|</table>)+', r'\1', html)
+
+    if verbose:
+        new_len = len(html)
+        reduction = (1 - new_len / original_len) * 100 if original_len > 0 else 0
+        print(f"[INFO] Sanitized: {original_len} -> {new_len} chars ({reduction:.1f}% reduction)")
+
+    return html
+
+
 def extract_dsidDocContWrap(filepath: Path, verbose: bool = False) -> str | None:
     """
     Extract the dsidDocContWrap div content from an MHTML file.
@@ -164,6 +287,9 @@ def process_file(input_path: Path, output_path: Path | None = None, verbose: boo
     if not html:
         print(f"ERROR: Could not extract dsidDocContWrap from {input_path.name}")
         return False
+
+    # Sanitize HTML to remove cruft
+    html = sanitize_html(html, verbose)
 
     # Get title for the HTML document
     title = extract_title(input_path)
