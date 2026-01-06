@@ -1,1 +1,4 @@
 __pycache__/
+
+# Intermediary extracted HTML files (Step 1 output)
+*.extracted.html
