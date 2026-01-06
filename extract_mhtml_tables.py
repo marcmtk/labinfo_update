@@ -28,10 +28,17 @@ class MHTMLTableExtractor:
         '=C3=A6': 'æ',
         '=C3=89': 'É',
         '=C3=A9': 'é',
+        '=C3=B6': 'ö',
+        '=C3=96': 'Ö',
+        '=C3=AD': 'í',
         '=C2=B0': '°',
+        '=CE=B2': 'β',  # Greek beta
         '=E2=94=82': '│',
         '=E2=80=93': '–',  # En dash
         '=E2=80=94': '—',  # Em dash
+        '=E2=80=99': "'",  # Right single quote/apostrophe
+        '=E2=80=9C': '"',  # Left double quote
+        '=E2=80=9D': '"',  # Right double quote
         '=E2=89=A5': '≥',  # Greater than or equal
         '=C3=97': '×',  # Multiplication sign
         '=3D': '=',
@@ -68,18 +75,16 @@ class MHTMLTableExtractor:
 
     def extract_main_table(self, filepath: Path) -> Optional[str]:
         """
-        Extract the main laboratory information table from an MHTML file.
+        Extract the full document content from an MHTML file.
 
-        Handles multiple table formats:
-        - Tables with green headers (bgcolor="#99cc00")
-        - Tables with border styling
-        - Other structured data tables
+        Extracts all document sections (tableDokAfsnit) which contain the complete
+        clinical information including tables, text, lists, and references.
 
         Args:
             filepath: Path to the MHTML file
 
         Returns:
-            HTML string of the extracted table, or None if not found
+            HTML string of the extracted content, or None if not found
         """
         self.log(f"Reading file: {filepath}")
 
@@ -90,6 +95,7 @@ class MHTMLTableExtractor:
         content = re.sub(r'=\r?\n', '', content)
 
         # Try pattern 1: Table with green headers (bgcolor="#99cc00")
+        # This pattern is for certain document types with specific table structures
         pattern1 = r'<table[^>]*>.*?bgcolor.*?#99cc00.*?UNDERS.*?PRINCIP.*?</table>'
         match = re.search(pattern1, content, re.DOTALL | re.IGNORECASE)
 
@@ -97,69 +103,47 @@ class MHTMLTableExtractor:
             self.log("Found table with green headers (Pattern 1)")
             table_html = match.group(0)
         else:
-            # Try pattern 2: Tables with border styling containing structured data
-            # Look for tables with bold headers and border styles
-            pattern2 = r'<table[^>]*border[^>]*>.*?</table>'
-            matches = list(re.finditer(pattern2, content, re.DOTALL | re.IGNORECASE))
+            # Try pattern 2: Extract ALL document sections (tableDokAfsnit)
+            # These sections contain the full document content including tables, text, lists, etc.
+            section_pattern = r'<table[^>]*class=3D"tableDokAfsnit"[^>]*>.*?</table>'
+            section_matches = list(re.finditer(section_pattern, content, re.DOTALL | re.IGNORECASE))
 
-            # Find ALL tables with structured content (headers in bold), not just the largest
-            matching_tables = []
-
-            for m in matches:
-                table = m.group(0)
-                # Check if table has bold headers and substantial content
-                has_headers = bool(re.search(r'<b[^>]*>.*?(Hyppigste|Fokus|Behandling|INDIKATION|PRINCIP)', table, re.IGNORECASE))
-                table_size = len(table)
-
-                # Include tables that have clinical headers and reasonable size
-                if has_headers and table_size > 1000:  # Minimum size threshold
-                    matching_tables.append(table)
-
-            if matching_tables:
-                self.log(f"Found {len(matching_tables)} tables with clinical data (Pattern 2)")
-                # Wrap all tables in a container
-                table_html = '<div>' + '\n'.join(matching_tables) + '</div>'
+            if section_matches:
+                self.log(f"Found {len(section_matches)} document sections (Pattern 2)")
+                # Combine all sections
+                table_html = '<div>' + '\n'.join(m.group(0) for m in section_matches) + '</div>'
             else:
-                # Try pattern 3: Find nested data tables within document sections
-                # First get all section tables
-                section_pattern = r'<table[^>]*class=["\']*tableDokAfsnit[^>]*>.*?</table>'
-                section_matches = list(re.finditer(section_pattern, content, re.DOTALL | re.IGNORECASE))
+                # Fall back to pattern 3: Tables with border styling containing structured data
+                # This is the old pattern for compatibility
+                pattern3 = r'<table[^>]*border[^>]*>.*?</table>'
+                matches = list(re.finditer(pattern3, content, re.DOTALL | re.IGNORECASE))
 
-                if section_matches:
-                    self.log(f"Found {len(section_matches)} document sections")
+                # Find ALL tables with structured content (headers in bold)
+                matching_tables = []
 
-                    # Extract nested data tables from within sections
-                    nested_tables = []
-                    for section_match in section_matches:
-                        section_html = section_match.group(0)
+                for m in matches:
+                    table = m.group(0)
+                    # Check if table has bold headers and substantial content
+                    has_headers = bool(re.search(r'<b[^>]*>.*?(Hyppigste|Fokus|Behandling|INDIKATION|PRINCIP)', table, re.IGNORECASE))
+                    table_size = len(table)
 
-                        # Find tables with border/style attributes (actual data tables)
-                        nested_pattern = r'<table[^>]*(?:border|style)[^>]*>.*?</table>'
-                        nested_matches = re.finditer(nested_pattern, section_html, re.DOTALL | re.IGNORECASE)
+                    # Include tables that have clinical headers and reasonable size
+                    if has_headers and table_size > 1000:  # Minimum size threshold
+                        matching_tables.append(table)
 
-                        for nested_match in nested_matches:
-                            nested_table = nested_match.group(0)
-                            # Only include tables that aren't the outer section table itself
-                            if 'tableDokAfsnit' not in nested_table[:100]:
-                                nested_tables.append(nested_table)
-
-                    if nested_tables:
-                        self.log(f"Found {len(nested_tables)} nested data tables (Pattern 3)")
-                        # Wrap all tables in a container
-                        table_html = '<div>' + '\n'.join(nested_tables) + '</div>'
-                    else:
-                        # Fall back to combining section content
-                        self.log("Using section content as fallback")
-                        table_html = '<table>' + ''.join(m.group(0) for m in section_matches) + '</table>'
+                if matching_tables:
+                    self.log(f"Found {len(matching_tables)} tables with clinical data (Pattern 3)")
+                    # Wrap all tables in a container
+                    table_html = '<div>' + '\n'.join(matching_tables) + '</div>'
                 else:
-                    self.log("No suitable table found")
+                    self.log("No suitable content found")
                     return None
 
         # Decode the HTML
         table_html = self.decode_quoted_printable(table_html)
         table_html = unescape(table_html)
 
-        self.log("Table extracted successfully")
+        self.log("Content extracted successfully")
         return table_html
 
     def parse_table_rows(self, table_html: str) -> List[List[str]]:
