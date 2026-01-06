@@ -6,47 +6,65 @@ Project to extract laboratory information from MHTML files and convert to Markdo
 
 This project extracts structured laboratory information tables from MHTML web archives and converts them to clean, readable Markdown files with proper Danish character support.
 
-## Usage
+## Workflow
 
-### Extract a single file
+The conversion process consists of three steps:
+
+### Step 1: Extract HTML (Automated)
+
+Extract the `dsidDocContWrap` div content from MHTML files to intermediary HTML files.
+
+```bash
+# Extract a single file
+./extract_html.py "input_file.mhtml"
+
+# Extract all MHTML files in current directory
+./extract_html.py --all
+
+# With verbose output
+./extract_html.py --all -v
+```
+
+This produces `.extracted.html` files that can be viewed in a browser.
+
+### Step 2: Convert to Markdown (Manual)
+
+The assistant manually reviews the extracted HTML file and converts it to Markdown format:
+
+1. Open the `.extracted.html` file in a browser to view the content
+2. Have the assistant read the HTML file and convert it to Markdown
+3. The assistant creates a `.md` file with proper formatting:
+   - Headers become `##` sections
+   - Tables are converted to Markdown tables
+   - Lists are converted to `-` bullet points
+   - Danish characters are preserved
+
+### Step 3: Compare and Verify
+
+Compare the new Markdown output against the original HTML to verify fidelity:
+
+1. Open the `.extracted.html` file in a browser
+2. Review the `.md` file
+3. Check that all content is preserved
+4. Verify tables, lists, and formatting match
+
+## Legacy Script
+
+The original `extract_mhtml_tables.py` script combines all steps into one automated process. It remains available for reference or quick conversions:
 
 ```bash
 ./extract_mhtml_tables.py "input_file.mhtml"
-```
-
-### Extract with custom output name
-
-```bash
-./extract_mhtml_tables.py "input_file.mhtml" -o "output.md"
-```
-
-### Extract all MHTML files in current directory
-
-```bash
 ./extract_mhtml_tables.py --all
-```
-
-### Extract all MHTML files in a specific directory
-
-```bash
-./extract_mhtml_tables.py --all -d /path/to/mhtml/files
-```
-
-### Enable verbose output
-
-```bash
-./extract_mhtml_tables.py "input_file.mhtml" -v
 ```
 
 ## Features
 
-- ✅ Extracts laboratory information tables from MHTML files
-- ✅ Properly decodes Danish characters (ø, å, æ, etc.)
-- ✅ Converts HTML lists to Markdown bullet points
-- ✅ Preserves document structure and formatting
-- ✅ Batch processing support for multiple files
-- ✅ Automatic output filename generation
-- ✅ Detailed error reporting and logging
+- Extracts laboratory information from MHTML files
+- Properly decodes Danish characters (ø, å, æ, etc.)
+- Preserves document structure and formatting
+- Batch processing support for multiple files
+- Automatic output filename generation
+- Detailed error reporting and logging
 
 ## Requirements
 
