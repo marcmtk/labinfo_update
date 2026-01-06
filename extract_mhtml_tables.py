@@ -499,6 +499,36 @@ class MHTMLTableExtractor:
 
         return default_title
 
+    def extract_document_sections(self, filepath: Path) -> List[str]:
+        """
+        Extract individual document sections (tableDokAfsnit) from MHTML file.
+
+        Args:
+            filepath: Path to the MHTML file
+
+        Returns:
+            List of HTML strings, one per section
+        """
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Remove soft line breaks (quoted-printable continuation)
+        content = re.sub(r'=\r?\n', '', content)
+
+        # Extract ALL document sections (tableDokAfsnit)
+        section_pattern = r'<table[^>]*class=3D"tableDokAfsnit"[^>]*>.*?</table>'
+        section_matches = list(re.finditer(section_pattern, content, re.DOTALL | re.IGNORECASE))
+
+        sections = []
+        for match in section_matches:
+            section_html = match.group(0)
+            # Decode the HTML
+            section_html = self.decode_quoted_printable(section_html)
+            section_html = unescape(section_html)
+            sections.append(section_html)
+
+        return sections
+
     def process_file(self, input_path: Path, output_path: Optional[Path] = None) -> bool:
         """
         Process a single MHTML file and convert it to Markdown.
@@ -512,23 +542,67 @@ class MHTMLTableExtractor:
         """
         self.log(f"Processing: {input_path.name}")
 
-        # Extract the table
-        table_html = self.extract_main_table(input_path)
-        if not table_html:
-            print(f"ERROR: Could not extract table from {input_path.name}")
-            return False
-
-        # Parse rows
-        rows = self.parse_table_rows(table_html)
-        if not rows:
-            print(f"ERROR: No rows found in {input_path.name}")
-            return False
-
-        # Get title
+        # Get document title
         title = self.extract_document_title(input_path)
 
-        # Convert to markdown
-        markdown = self.rows_to_markdown(rows, title)
+        # First try the old extraction method (for documents with green headers)
+        table_html = self.extract_main_table(input_path)
+
+        # Check if we got tableDokAfsnit sections (Pattern 2)
+        if table_html and '<div>' in table_html[:10]:
+            # This is from Pattern 2 - extract sections individually to preserve structure
+            self.log("Processing document sections individually to preserve table structures")
+            sections = self.extract_document_sections(input_path)
+
+            if not sections:
+                print(f"ERROR: No sections found in {input_path.name}")
+                return False
+
+            markdown_parts = [f"# {title}\n"]
+
+            for section in sections:
+                # Parse this section
+                rows = self.parse_table_rows(section)
+                if rows:
+                    # Determine the format for this section
+                    num_columns = 0
+                    for row in rows:
+                        if row and any(cell.strip() for cell in row):
+                            num_columns = len(row)
+                            break
+
+                    # Render based on column count
+                    metadata_headers = {
+                        'Dokumentbrugere:',
+                        'Læseadgang:',
+                        'Coronavirus (SARS-Coronavirus-2)',
+                        'KLINISK MIKROBIOLOGISK AFSNIT'
+                    }
+
+                    if num_columns > 2:
+                        # Multi-column table
+                        section_md = self._render_markdown_table(rows, "", metadata_headers)
+                        markdown_parts.append(section_md)
+                    else:
+                        # Two-column or text content
+                        section_md = self._render_two_column_format(rows, "", metadata_headers)
+                        markdown_parts.append(section_md)
+
+            markdown = '\n'.join(markdown_parts)
+        else:
+            # Old method - single table extraction
+            if not table_html:
+                print(f"ERROR: Could not extract content from {input_path.name}")
+                return False
+
+            # Parse rows
+            rows = self.parse_table_rows(table_html)
+            if not rows:
+                print(f"ERROR: No rows found in {input_path.name}")
+                return False
+
+            # Convert to markdown
+            markdown = self.rows_to_markdown(rows, title)
 
         # Determine output path
         if output_path is None:
