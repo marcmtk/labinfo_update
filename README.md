@@ -38,6 +38,7 @@ The assistant manually reviews the extracted HTML file and converts it to Markdo
    - Tables are converted to Markdown tables
    - Lists are converted to `-` bullet points
    - Danish characters are preserved
+4. **Important:** Name the output `.md` file to match the original `.mhtml` source file (e.g., `LABInfo KMA, SVS - I.1 - Example, ver. 5.mhtml` → `LABInfo KMA, SVS - I.1 - Example, ver. 5.md`)
 
 ### Step 3: Compare and Verify
 
