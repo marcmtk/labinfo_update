@@ -102,9 +102,8 @@ class MHTMLTableExtractor:
             pattern2 = r'<table[^>]*border[^>]*>.*?</table>'
             matches = list(re.finditer(pattern2, content, re.DOTALL | re.IGNORECASE))
 
-            # Find the largest table with structured content (headers in bold)
-            best_match = None
-            max_size = 0
+            # Find ALL tables with structured content (headers in bold), not just the largest
+            matching_tables = []
 
             for m in matches:
                 table = m.group(0)
@@ -112,13 +111,14 @@ class MHTMLTableExtractor:
                 has_headers = bool(re.search(r'<b[^>]*>.*?(Hyppigste|Fokus|Behandling|INDIKATION|PRINCIP)', table, re.IGNORECASE))
                 table_size = len(table)
 
-                if has_headers and table_size > max_size:
-                    best_match = m
-                    max_size = table_size
+                # Include tables that have clinical headers and reasonable size
+                if has_headers and table_size > 1000:  # Minimum size threshold
+                    matching_tables.append(table)
 
-            if best_match:
-                self.log(f"Found table with border styling (Pattern 2, size={max_size})")
-                table_html = best_match.group(0)
+            if matching_tables:
+                self.log(f"Found {len(matching_tables)} tables with clinical data (Pattern 2)")
+                # Wrap all tables in a container
+                table_html = '<div>' + '\n'.join(matching_tables) + '</div>'
             else:
                 # Try pattern 3: Find nested data tables within document sections
                 # First get all section tables
